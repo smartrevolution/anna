@@ -7,12 +7,8 @@
 (def activation-fn (fn [x] (Math/tanh x)))
 (def deactivation-fn (fn [y] (Mtrx/- 1.0 (Mtrx/* y y))))
 (def learning-rate 0.2)
-(def max-iterations 10)
+(def max-iterations 300)
 (def error-threshold 0.005)
-(def training-data [{:input [[0] [0]] :output [[0]]}
-                    {:input [[1] [0]] :output [[1]]}
-                    {:input [[0] [1]] :output [[1]]}
-                    {:input [[1] [1]] :output [[0]]}])
 
 (defn zeros
   [n m]
@@ -44,7 +40,7 @@
 (defn bind-bias
   "Add a bias node to an activations vector"
   [activations]
-  (into (matrix [[0]]) activations))
+  (into (matrix [[1]]) activations))
 
 (defn mse
   [errors]
@@ -88,11 +84,12 @@
       (assoc this :delta (rest hidden-delta))))
   (calc-new-weights
     [this learning-rate activations]
-    (let [new-weights (Mtrx/- (:weights this)
+    (let [weights-delta (matrix-mult (:delta this)
+                                     (transpose
+                                      (bind-bias activations)))
+          new-weights (Mtrx/- (:weights this)
                               (Mtrx/* learning-rate
-                                      (matrix-mult (:delta this)
-                                                   (transpose
-                                                    (bind-bias activations)))))]
+                                      weights-delta))]
       (assoc this :weights new-weights))))
 
 (defrecord NeuralNetwork [layers]
@@ -145,21 +142,27 @@
                  (conj accu updated-layer))))))
   (train
     [this training-data]
-    (loop [training (first training-data)
-           remaining-data (rest training-data)
-           nn this
-           error 0]
-      (println training error)
-      (if (empty? remaining-data)
-        nn
-        (let [nn1 (forwardpropagation nn (:input training))
-              nn2 (backpropagation nn1 (:output training))
-              nn3 (update-weights nn2 (:input training))]
-          (recur (first remaining-data)
-                 (rest remaining-data)
-                 nn3
-                 (+ error
-                    (mse (-> nn3 :layers last :delta))))))))
+    (loop [iter max-iterations
+           outer-nn this]
+      (if (= iter 0)
+        outer-nn
+        (recur
+         (dec iter)
+         (loop [training (first training-data)
+                remaining-data (rest training-data)
+                inner-nn outer-nn
+                error 0]
+           (println training error)
+           (if (empty? remaining-data)
+             inner-nn
+             (let [nn1 (forwardpropagation inner-nn (:input training))
+                   nn2 (backpropagation nn1 (:output training))
+                   nn3 (update-weights nn2 (:input training))]
+               (recur (first remaining-data)
+                      (rest remaining-data)
+                      nn3
+                      (+ error
+                         (mse (-> nn3 :layers last :delta)))))))))))
   (exec
     [this input]
     (-> (forwardpropagation this input) :layers last :activations)))
