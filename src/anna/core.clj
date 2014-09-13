@@ -4,10 +4,20 @@
   (:require [clojure.core.matrix.operators :as Mtrx])
   (:gen-class))
 
-(def activation-fn (fn [x] (Math/tanh x)))
-(def deactivation-fn (fn [y] (Mtrx/- 1.0 (Mtrx/* y y))))
-(def learning-rate 0.2)
-(def max-iterations 300)
+
+(defn g
+  [z]
+  (emap #(/ 1 (+ 1 (Math/exp (- %)))) z)) ;TODO: Vectorized version
+
+(defn g'
+  [z]
+  (Mtrx/* z (Mtrx/- 1 z)))
+
+;(def activation-fn (fn [x] (Math/tanh x)))
+;(def deactivation-fn (fn [y] (Mtrx/- 1.0 (Mtrx/* y y))))
+
+(def learning-rate 3.0)
+(def max-iterations 500)
 (def error-threshold 0.005)
 
 (defn zeros
@@ -66,20 +76,20 @@
   (calc-activations
     [this input]
     (let [weighted-sum (matrix-mult weights (bind-bias input))
-          new-activations (emap activation-fn weighted-sum)]
+          new-activations (g weighted-sum)]
       (assoc this :activations new-activations)))
   Backpropagation
   (calc-output-delta
     [this ideal-output]
     (let [activations (:activations this)
           output-delta (Mtrx/* (Mtrx/- ideal-output activations)
-                               (deactivation-fn activations))]
+                               (g' activations))]
       (assoc this :delta output-delta)))
   (calc-hidden-delta
     [this weights delta]
     (let [hidden-delta (Mtrx/* (matrix-mult (transpose weights)
                                             delta)
-                               (deactivation-fn (bind-bias (:activations this))))]
+                               (g' (bind-bias (:activations this))))]
       ;call (rest hidden-delta) to remove the bias from the result
       (assoc this :delta (rest hidden-delta))))
   (calc-new-weights
