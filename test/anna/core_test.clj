@@ -25,8 +25,41 @@
         first-column (fn [nn] (get-column (-> nn :layers first :weights) 0))]
     (is (not= 0 (compare (first-column nn2) (first-column nn3))))))
 
-(deftest anna
-  (testing "XOR"
+(deftest precalculated-XOR
+  (testing "Precalculated XOR"
+    (let [nn (make-neuralnetwork [2 2 1])
+          input (matrix [[1.0]
+                         [0.0]])
+          output (matrix [[1.0]])
+          w1 (matrix [[-0.46 -0.07 0.22]
+                      [0.10 0.94 0.46]])
+          z1 (matrix [[-0.53]
+                      [1.05]])
+          a1 (matrix [[0.37]
+                      [0.74]])
+          d1 (matrix [[0.0]
+                      [0.0]])
+          g1 (matrix [[0.0 0.0 0.0]
+                      [0.0 0.0 0.0]])
+          w2 (matrix [[0.78 -0.22 0.58]])
+          z2 (matrix [[1.1254]])
+          a2 (matrix [[0.75]])
+          d2 (matrix [[0.0]])
+          g2 (matrix [[0.0 0.0 0.0]])
+          layer1 (anna.core.Layer. w1 z1 a1 d1 g1)
+          layer2 (anna.core.Layer. w2 z2 a2 d2 g2)
+          nn0 (assoc nn :layers [layer1 layer2])
+          nn1 (backpropagation nn0 output)
+          nn2 (update-weights nn1 input)]
+      (println "**************************")
+      (pprint nn0)
+      (pprint nn1)
+      (pprint nn2)
+      (println "**************************"))))
+
+
+(deftest random-xor
+  (testing "Randomized XOR"
     (let [nn0 (make-neuralnetwork [2 3 1])
           nn1 (train nn0 training-data)]
       (testing "0 xor 0 = 0"

@@ -11,14 +11,11 @@
 
 (defn g'
   [z]
-  (Mtrx/* z (Mtrx/- 1 z)))
+  (Mtrx/* (g z) (Mtrx/- 1 (g z))))
 
-;(def activation-fn (fn [x] (Math/tanh x)))
-;(def deactivation-fn (fn [y] (Mtrx/- 1.0 (Mtrx/* y y))))
-
-(def learning-rate 0.3)
-(def max-iterations 20000)
-(def error-threshold 0.005)
+;(def learning-rate 0.7)
+;(def max-iterations 10000)
+;(def error-threshold 0.001)
 
 (defn zeros
   [n m]
@@ -68,29 +65,30 @@
   (forwardpropagation [this input])
   (backpropagation [this ideal-output])
   (calc-error [this])
-  (update-weights [this training-data])
+  (update-weights [this input])
   (train [this training-data])
   (exec [this input]))
 
-(defrecord Layer [weights activations delta]
+(defrecord Options [learning-rate max-iterations error-threshold])
+
+(defrecord Layer [weights weighted-sum activations delta gradient]
   Forwardpropagation
   (calc-activations
     [this input]
     (let [weighted-sum (matrix-mult weights (bind-bias input))
           new-activations (g weighted-sum)]
-      (assoc this :activations new-activations)))
+      (assoc this :weighted-sum weighted-sum :activations new-activations)))
   Backpropagation
   (calc-output-delta
     [this ideal-output]
-    (let [activations (:activations this)
-          output-delta (Mtrx/* (Mtrx/- ideal-output activations)
-                               (g' activations))]
+    (let [output-delta (Mtrx/* (Mtrx/- (:activations this) ideal-output)
+                               (g' (:weighted-sum this)))]
       (assoc this :delta output-delta)))
   (calc-hidden-delta
     [this weights delta]
     (let [hidden-delta (Mtrx/* (matrix-mult (transpose weights)
                                             delta)
-                               (g' (bind-bias (:activations this))))]
+                               (g' (bind-bias (:weighted-sum this))))]
       ;call (rest hidden-delta) to remove the bias from the result
       (assoc this :delta (rest hidden-delta))))
   (calc-new-weights
@@ -101,20 +99,20 @@
           new-weights (Mtrx/- (:weights this)
                               (Mtrx/* learning-rate
                                       weights-delta))]
-      (assoc this :weights new-weights))))
+      (assoc this :weights new-weights :gradient (matrix weights-delta)))))
 
-(defrecord NeuralNetwork [layers iterations error]
+(defrecord NeuralNetwork [layers iterations error options]
   ANN
   (forwardpropagation
     [this input]
     (loop [layers (:layers this)
            accu []
-           input input]
+           activations input]
       (if (empty? layers)
         (assoc this :layers accu)
         (let [cur-layer (first layers)
               remaining-layers (rest layers)
-              updated-layer (calc-activations cur-layer input)
+              updated-layer (calc-activations cur-layer activations)
               new-activations (:activations updated-layer)]
           (recur remaining-layers
                  (conj accu updated-layer)
@@ -149,17 +147,17 @@
         (assoc this :layers accu)
         (let [cur-layer (first layers)
               updated-layer (calc-new-weights cur-layer
-                                              learning-rate
+                                              (:learning-rate (:options this))
                                               prev-activations)]
           (recur (rest layers)
                  (:activations cur-layer)
                  (conj accu updated-layer))))))
   (train
     [this training-data]
-    (loop [iter max-iterations
+    (loop [iter (:max-iterations (:options this))
            outer-nn this]
-      (if (and (< iter max-iterations)
-               (> (:error outer-nn) error-threshold))
+      (if (and (< iter (:max-iterations (:options this)))
+               (> (:error outer-nn) (:error-threshold (:options this))))
         outer-nn
         (recur
          (dec iter)
@@ -188,7 +186,7 @@
         result)))); ann with multiple outputs
 
 (defn make-neuralnetwork
-  ([nodes-in-layer]
+  ([nodes-in-layer & options]
       {:pre [(and
               (vector? nodes-in-layer)
               (not (empty? nodes-in-layer))
@@ -196,14 +194,14 @@
       (let [synapses (partition 2 1 nodes-in-layer)
             layers (map (fn [[cols rows]]
                           (let [col-with-bias (inc cols)]
-                            ;add one column for the bias weights
+                            ;add column 0 for the bias weights
                             (Layer. (matrix (randos rows col-with-bias)) 
                                     (matrix (zeros rows 1))
-                                    (matrix (zeros rows col-with-bias)))))
+                                    (matrix (zeros rows 1))
+                                    (matrix (zeros rows col-with-bias))
+                                    (matrix (randos rows col-with-bias)))))
                         synapses)]
-        (NeuralNetwork. layers 0 0)))
-  ([nodes-in-layer & layer]
-     (NeuralNetwork. layer 0 0)))
+        (NeuralNetwork. layers 0 0 (or options (Options. 0.7 10000 0.001))))))
 
 (defn -main
   "I don't do a whole lot ... yet."
