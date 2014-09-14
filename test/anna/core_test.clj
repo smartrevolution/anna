@@ -30,17 +30,15 @@
     (let [nn0 (make-neuralnetwork [2 3 1])
           nn1 (train nn0 training-data)]
       (testing "0 xor 0 = 0"
-        (let [result (first (first (exec nn1 [[0] [0]])))]
-          (println result)
-          (is (= (Math/round result) 0))))
+        (let [result (exec nn1 [[0] [0]])]
+          (is (= result 0))))
       (testing "1 xor 0 = 1"
-        (is (= (Math/round (first (first (exec nn1 [[1] [0]])))) 1)))
+        (is (= (exec nn1 [[1] [0]]) 1)))
       (testing "0 xor 1 = 1"
-        (is (= (Math/round (first (first (exec nn1 [[0] [1]])))) 1)))
+        (is (= (exec nn1 [[0] [1]]) 1)))
       (testing "1 xor 1 = 0"
-        (let [result (first (first (exec nn1 [[1] [1]])))]
-          (println result)
-          (is (= (Math/round result) 0))))
+        (let [result (exec nn1 [[1] [1]])]
+          (is (= result 0))))
       (pprint nn0)
       (pprint nn1))))
 
