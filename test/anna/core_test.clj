@@ -20,10 +20,11 @@
         nn0 (make-neuralnetwork [2 3 1])
         nn1 (forwardpropagation nn0 input)
         nn2 (backpropagation nn1 output)
-        nn3 (update-weights nn2 input)
+        nn3 (update-gradients nn2 input)
+        nn4 (update-weights nn3)
         first-weights (fn [nn] (-> nn :layers first :weights))
         first-column (fn [nn] (get-column (-> nn :layers first :weights) 0))]
-    (is (not= 0 (compare (first-column nn2) (first-column nn3))))))
+    (is (= 0 (compare (first-column nn2) (first-column nn3))))))
 
 (deftest precalculated-XOR
   (testing "Precalculated XOR"
@@ -50,12 +51,14 @@
           layer2 (anna.core.Layer. w2 z2 a2 d2 g2)
           nn0 (assoc nn :layers [layer1 layer2])
           nn1 (backpropagation nn0 output)
-          nn2 (update-weights nn1 input)]
-      (println "**************************")
-      (pprint nn0)
-      (pprint nn1)
-      (pprint nn2)
-      (println "**************************"))))
+          nn2 (update-gradients nn1 input)
+          nn3 (update-weights nn2)]
+      ;;(println "**************************")
+      ;;(pprint nn0)
+      ;; (pprint nn1)
+      ;; (pprint nn2)
+      ;;(pprint nn3)
+      #_(println "**************************"))))
 
 
 (deftest random-xor
