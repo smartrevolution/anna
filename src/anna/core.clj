@@ -65,13 +65,19 @@
 (defprotocol ANN
   (forwardpropagation [this input])
   (backpropagation [this ideal-output])
-  (calc-error [this])
+  (calc-error [this ideal-output])
   (update-gradients [this input])
   (update-weights [this])
   (train [this training-data])
+  (output [this])
+  (errorr [this ideal-output])
   (exec [this input]))
 
-(defrecord Options [learning-rate max-iterations error-threshold momentum])
+(defrecord Options [learning-rate
+                    max-iterations
+                    error-threshold
+                    momentum
+                    mini-batch-size])
 
 (defrecord Layer [weights weighted-sum activations delta gradients]
   Forwardpropagation
@@ -83,26 +89,25 @@
   Backpropagation
   (calc-output-delta
     [this ideal-output]
-    (let [output-delta (Mtrx/* (Mtrx/- ideal-output (:activations this))
-                               (g' (:weighted-sum this)))]
-      (assoc this :delta output-delta)))
+    (let [output-error (Mtrx/- (Mtrx/- (:activations this) ideal-output))
+          output-delta (Mtrx/* output-error (g' (:weighted-sum this)))]
+      (assoc this :delta output-delta :error output-error)))
   (calc-hidden-delta
     [this weights delta]
     (let [hidden-delta (Mtrx/* (matrix-mult (transpose weights)
                                             delta)
-                               (g' (bind-bias (:weighted-sum this))))]
+                               (g' (bind-bias (:weighted-sum this))))] ;TODO: Bias?
       ;call (rest hidden-delta) to remove the bias from the result
       (assoc this :delta (rest hidden-delta))))
   (calc-gradients
     [this activations]
-    (let [gradients (Mtrx/+ (:gradients this)
-                            (matrix-mult (:delta this)
-                                         (transpose
-                                          (bind-bias activations))))]
+    (let [gradients (matrix-mult (:delta this)
+                                 (transpose
+                                  (bind-bias activations)))]
       (assoc this :gradients gradients)))
   (calc-new-weights
     [this learning-rate momentum]
-    (let [new-weights (Mtrx/- (:weights this)
+    (let [new-weights (Mtrx/+ (:weights this)
                               (Mtrx/* learning-rate
                                       (:gradients this)))]
       (assoc this :weights new-weights))))
@@ -142,8 +147,9 @@
                    (conj accu updated-layer)
                    updated-layer))))))
   (calc-error
-    [this]
-    (mse (-> this :layers last :delta)))
+    [this ideal-output]
+    #_(mse (-> this :layers last :delta))
+    (mse (errorr this ideal-output)))
   (update-gradients
     [this input]
     (loop [layers (:layers this)
@@ -171,38 +177,52 @@
                  (conj accu updated-layer))))))
   (train
     [this training-data]
-    (loop [iter (:max-iterations (:options this))
-           training-batch (shuffle training-data)
-           outer-nn this]
-      (if (< iter 0)
-        #_(< (:error outer-nn) (:error-threshold (:options this)))
-        outer-nn
-        (recur
-         (dec iter)
-         (shuffle training-data)
-         (loop [training (first training-batch)
-                remaining-data (rest training-batch)
-                inner-nn outer-nn]
-           (if (empty? remaining-data)
-             inner-nn
-             (let [nn1 (forwardpropagation inner-nn (:input training))
-                   nn2 (backpropagation nn1 (:output training))
-                   nn3 (update-gradients nn2 (:input training))
-                   error (+ (:error this)
-                            (/ (calc-error nn3)
-                               (count training-data)))
-                   nn4 (assoc nn3 :error error :iterations iter)]
-               (when (mod iter 10)
-                 (println "Error " iter ": " error))
-               (recur (first remaining-data)
-                      (rest remaining-data)
-                      (update-weights nn4)))))))))
+    (let [opt (:options this)
+          mini-batch-size (:mini-batch-size opt)
+          max-iterations (:max-iterations opt)
+          error-threshold (:error-threshold opt)
+          select-mini-batch (fn [] (repeatedly mini-batch-size
+                                               #(rand-nth training-data)))]
+      (loop [iter 0
+             mini-batch (select-mini-batch)
+             outer-nn this]
+        (if (or (< (:error outer-nn) error-threshold)
+                (> iter max-iterations))
+          outer-nn
+          (recur (inc iter)
+                 (select-mini-batch)
+                 (loop [sample (first mini-batch)
+                        remaining-samples (rest mini-batch)
+                        total-error 0
+                        inner-nn outer-nn]
+                   (if (empty? remaining-samples)
+                     inner-nn
+                     (let [nn1 (forwardpropagation inner-nn (:input sample))
+                           nn2 (backpropagation nn1 (:output sample))
+                           nn3 (update-gradients nn2 (:input sample))
+                           avg-error (/ (/ (calc-error nn3 (:output sample))
+                                           mini-batch-size) 2)
+                           summed-avg-error (+ total-error avg-error)
+                           nn4 (assoc nn3 :error summed-avg-error :iterations iter)]
+                       (when (mod iter 10)
+                         (println iter "-" sample "=" (output nn4)
+                                  "Error" (errorr nn4 (:output sample))
+                                  "Error:" summed-avg-error))
+                       (recur (first remaining-samples)
+                              (rest remaining-samples)
+                              summed-avg-error
+                              (update-weights nn4))))))))))
+  
+  (output
+    [this]
+    (-> this :layers last :activations))
+  (errorr
+    [this ideal-output]
+    (Mtrx/- ideal-output (output this)))
   (exec
     [this input]
     (let [result (-> (forwardpropagation this input)
-                     :layers
-                     last
-                     :activations)
+                     output)
           flattened-result (flatten result)]
       (if (= 1 flattened-result)
         flattened-result ;ann with binary output
@@ -224,7 +244,7 @@
                                     (matrix (zeros rows col-with-bias))
                                     (matrix (randos rows col-with-bias)))))
                         synapses)]
-        (NeuralNetwork. layers 0 0 (or options (Options. 0.7 500 0.001 0.3))))))
+        (NeuralNetwork. layers 0 1.0 (or options (Options. 0.7 1000 0.001 0.3 4))))))
 
 (defn -main
   "I don't do a whole lot ... yet."

@@ -64,7 +64,8 @@
 (deftest random-xor
   (testing "Randomized XOR"
     (let [nn0 (make-neuralnetwork [2 3 1])
-          nn1 (train nn0 training-data)]
+          nn1 (train nn0 training-data)
+          round (fn [n] (Math/round n))]
       (testing "0 xor 0 = 0"
         (let [result (exec nn1 [[0] [0]])]
           (is (= result 0))))
@@ -75,8 +76,8 @@
       (testing "1 xor 1 = 0"
         (let [result (exec nn1 [[1] [1]])]
           (is (= result 0))))
-      (pprint nn0)
-      (pprint nn1))))
+      #_(pprint nn0)
+      #_(pprint nn1))))
 
 ;; (deftest vectormath
 ;;   (testing "vector math works"
