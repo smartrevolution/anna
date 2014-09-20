@@ -9,6 +9,7 @@
                  [midje "1.6.3"]]
   :main ^:skip-aot ann.core
   :target-path "target/%s"
+  :jvm-opts ["-Xmx1g"]
   :profiles {:uberjar {:aot :all}})
 
 ;:profiles {:dev {:dependencies [[midje "1.5.1"]]}}

@@ -1,42 +1,86 @@
 (ns anna.core
   (:use [clojure.core.matrix]
-        [clojure.pprint])
-  (:require [clojure.core.matrix.operators :as Mtrx])
+        [clojure.pprint]
+        [clojure.java.io]
+        [clojure.java.shell :only [sh]])
+  (:require [clojure.core.matrix.operators :as Mtrx]
+            [clojure.string :as str])
   (:gen-class))
 
 
-(defn g
+(def ^:dynamic *talk-to-me* true)
+(def ^:dynamic *username* (System/getProperty "user.name"))
+(def ^:dynamic *osname* (System/getProperty "os.name"))
+
+(defn- say
+  [msg]
+  (when (and *talk-to-me* (= "Mac OS X" *osname*))
+    (future (sh "say" "-v" "Samantha" msg))))
+
+(defn- mapval
+  [in-min in-max out-min out-max x]
+  (+ (/ (* (- x in-min) (- out-max out-min))
+        (- in-max in-min))
+     out-min))
+
+(defn- mnist-convert
+  [src-filename dest-filename]
+  (let [shrink (partial mapval 0 255 0.0 1.0)]
+    (with-open [wrtr (writer dest-filename)]
+      (.write wrtr "[")
+      (with-open [rdr (reader src-filename)]
+        (doseq [line (line-seq rdr)]
+          (let [converted-line line
+                [output & input] (str/split converted-line #",")
+                v-in (map #(shrink (Integer/parseInt %)) input)
+                v-out [(Integer/parseInt output)]]
+            (.write wrtr (str {:input (into [] v-in)
+                               :output (into [] v-out)}
+                              "\n"))))
+        (.write wrtr "]")))))
+
+(defn save
+  [filename form]
+  (let [file (file filename)]
+    (with-open [w (java.io.FileWriter. file)]
+      (print-dup form w))))
+
+(defn load
+  [filename]
+  (let [file (file filename)]
+    (with-open [r (java.io.PushbackReader. (java.io.FileReader. file))]
+      (read r))))
+
+
+(defn- g
   [z]
   (emap #(/ 1 (+ 1 (Math/exp (- %)))) z)) ;TODO: Vectorized version
 
-(defn g'
+(defn- g'
   [z]
   (Mtrx/* (g z) (Mtrx/- 1 (g z))))
 
-(defn zeros
+(defn- zeros
   [n m]
   (compute-matrix [n m]
                   (fn [_ _] 0)))
 
-(defn ones
+(defn- ones
   [n m]
   (compute-matrix [n m]
                   (fn [_ _] 1)))
 
-(defn rand-epsilon
+(defn- rand-epsilon
   [epsilon]
   (- (rand (* 2 epsilon)) epsilon))
 
-(defn randos
+(defn- randos
   [n m]
   (compute-matrix [n m]
                   (fn [_ _] (rand-epsilon 1))))
 
-(defn matrix-mult
+(defn- matrix-mult
   [a b]
-  #_{:pre [(let [[m n] (shape a)
-               [p q] (shape b)]
-           (= n p))]}
   ;(println "a" (shape a) (matrix? a)) (pm a)
   ;(println "b" (shape b) (matrix? b)) (pm b)
   (let [result (mmul a b)]
@@ -44,12 +88,12 @@
       result
       (matrix [result]))))
 
-(defn bind-bias
+(defn- bind-bias
   "Add a bias node to an activations vector"
   [activations]
   (into (matrix [[1]]) activations))
 
-(defn mse
+(defn- mse
   [errors]
   (/ (reduce + 0 (flatten (pow errors 2))) (count errors)))
 
@@ -204,7 +248,7 @@
                                            mini-batch-size) 2)
                            summed-avg-error (+ total-error avg-error)
                            nn4 (assoc nn3 :error summed-avg-error :iterations iter)]
-                       (when (mod iter 10)
+                       (when (= 0 (mod iter 250))
                          (println iter "-" sample "=" (output nn4)
                                   "Error" (errorr nn4 (:output sample))
                                   "Error:" summed-avg-error))
@@ -229,7 +273,9 @@
         result)))); ann with multiple outputs
 
 (defn make-neuralnetwork
-  ([nodes-in-layer & options]
+  ([nodes-in-layer]
+     (make-neuralnetwork nodes-in-layer (Options. 0.7 2000 0.001 0.3 4)))
+  ([nodes-in-layer options]
       {:pre [(and
               (vector? nodes-in-layer)
               (not (empty? nodes-in-layer))
@@ -244,7 +290,9 @@
                                     (matrix (zeros rows col-with-bias))
                                     (matrix (randos rows col-with-bias)))))
                         synapses)]
-        (NeuralNetwork. layers 0 1.0 (or options (Options. 0.7 1000 0.001 0.3 4))))))
+        (do
+          (say "Neural Network created.")
+          (NeuralNetwork. layers 0 1.0 options)))))
 
 (defn -main
   "I don't do a whole lot ... yet."
