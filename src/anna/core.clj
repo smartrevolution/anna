@@ -345,4 +345,5 @@ and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
 
 (defn -main
   [& args]
-  (pprint (parse-opts args cli-options)))
+  (pprint (parse-opts args cli-options))
+  (nrepl/start-server :port 7888))
