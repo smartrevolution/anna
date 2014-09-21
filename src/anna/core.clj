@@ -4,7 +4,12 @@
         [clojure.java.io]
         [clojure.java.shell :only [sh]])
   (:require [clojure.core.matrix.operators :as Mtrx]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [clojure.tools.logging :as log]
+            [clojure.tools.nrepl.server :only [start-server stop-server] :as nrepl]
+            [lamina.core :as lamina]
+            [aleph.http :as aleph]
+            [clojure.tools.cli :refer [parse-opts]])
   (:gen-class))
 
 
@@ -13,9 +18,14 @@
 (def ^:dynamic *osname* (System/getProperty "os.name"))
 
 (defn- say
-  [msg]
-  (when (and *talk-to-me* (= "Mac OS X" *osname*))
-    (future (sh "say" "-v" "Samantha" msg))))
+  ([msg]
+     (say msg true))
+  ([msg non-blocking]
+      (when (and *talk-to-me* (= "Mac OS X" *osname*))
+        (let [say-it (fn [s] (sh "say" "-v" "Samantha" s))]
+          (if (= true non-blocking)
+            (future (say-it msg))
+            (say-it msg))))))
 
 (defn- mapval
   [in-min in-max out-min out-max x]
@@ -23,29 +33,41 @@
         (- in-max in-min))
      out-min))
 
-(defn- mnist-convert
-  [src-filename dest-filename]
-  (let [shrink (partial mapval 0 255 0.0 1.0)]
-    (with-open [wrtr (writer dest-filename)]
-      (.write wrtr "[")
-      (with-open [rdr (reader src-filename)]
-        (doseq [line (line-seq rdr)]
-          (let [converted-line line
-                [output & input] (str/split converted-line #",")
-                v-in (map #(shrink (Integer/parseInt %)) input)
-                v-out [(Integer/parseInt output)]]
-            (.write wrtr (str {:input (into [] v-in)
-                               :output (into [] v-out)}
-                              "\n"))))
-        (.write wrtr "]")))))
+(defn- num-to-vector
+  [size x]
+  (assoc (into [] (map #(vector %)
+                       (repeat size 0.0)))
+    x
+    [1.0]))
 
-(defn save
+(defn- load-xor-data
+  []
+  [{:input [[0] [0]] :output [[0]]}
+   {:input [[1] [0]] :output [[1]]}
+   {:input [[0] [1]] :output [[1]]}
+   {:input [[1] [1]] :output [[0]]}])
+
+(defn- load-mnist-data
+  "Load csv files with mnist test data. Numbers are between 0..255 
+and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
+  [filename]
+  (with-open [rdr (reader filename)]
+    (doall
+     (for [line (line-seq rdr)
+           :let [scale-0-to-1 (partial mapval 0 255 0.0 1.0)
+                 [output & input] (str/split line #",")
+                 input-vector (into [] (map #(vector (scale-0-to-1 (Integer/parseInt %)))
+                                            input))
+                 output-vector (num-to-vector 10 (Integer/parseInt output))]]
+       {:input input-vector :output output-vector}))))
+
+(defn save-neuralnet
   [filename form]
   (let [file (file filename)]
     (with-open [w (java.io.FileWriter. file)]
       (print-dup form w))))
 
-(defn load
+(defn load-neuralnet
   [filename]
   (let [file (file filename)]
     (with-open [r (java.io.PushbackReader. (java.io.FileReader. file))]
@@ -227,6 +249,9 @@
           error-threshold (:error-threshold opt)
           select-mini-batch (fn [] (repeatedly mini-batch-size
                                                #(rand-nth training-data)))]
+      (say (str "Max iterations are " max-iterations ".") false)
+      (say (str "Mini batch size is " mini-batch-size ".") false)
+      (say (str "Error threshold is " error-threshold ".") false)
       (loop [iter 0
              mini-batch (select-mini-batch)
              outer-nn this]
@@ -248,15 +273,14 @@
                                            mini-batch-size) 2)
                            summed-avg-error (+ total-error avg-error)
                            nn4 (assoc nn3 :error summed-avg-error :iterations iter)]
-                       (when (= 0 (mod iter 250))
-                         (println iter "-" sample "=" (output nn4)
-                                  "Error" (errorr nn4 (:output sample))
-                                  "Error:" summed-avg-error))
+                       ;(when (= 0 (mod iter 10)))
+                       (println iter "-" sample "=" (output nn4)
+                                "Error" (errorr nn4 (:output sample))
+                                "Error:" summed-avg-error)
                        (recur (first remaining-samples)
                               (rest remaining-samples)
                               summed-avg-error
                               (update-weights nn4))))))))))
-  
   (output
     [this]
     (-> this :layers last :activations))
@@ -272,9 +296,9 @@
         flattened-result ;ann with binary output
         result)))); ann with multiple outputs
 
-(defn make-neuralnetwork
+(defn make-neuralnet
   ([nodes-in-layer]
-     (make-neuralnetwork nodes-in-layer (Options. 0.7 2000 0.001 0.3 4)))
+     (make-neuralnet nodes-in-layer (Options. 0.7 2000 0.001 0.3 4)))
   ([nodes-in-layer options]
       {:pre [(and
               (vector? nodes-in-layer)
@@ -294,7 +318,31 @@
           (say "Neural Network created.")
           (NeuralNetwork. layers 0 1.0 options)))))
 
+
+(defn hello-world [channel request]
+  (lamina/enqueue channel
+    {:status 200
+     :headers {"content-type" "text/html"}
+     :body "Hello World!"}))
+
+;(start-http-server hello-world {:port 8008})
+
+;(defonce nrepl-server (start-server :port 7888))
+
+(def cli-options
+  ;; An option with a required argument
+  [["-p" "--port PORT" "Port number"
+    :default 80
+    :parse-fn #(Integer/parseInt %)
+    :validate [#(< 0 % 0x10000) "Must be a number between 0 and 65536"]]
+   ;; A non-idempotent option
+   ["-v" nil "Verbosity level"
+    :id :verbosity
+    :default 0
+    :assoc-fn (fn [m k _] (update-in m [k] inc))]
+   ;; A boolean option defaulting to nil
+   ["-h" "--help"]])
+
 (defn -main
-  "I don't do a whole lot ... yet."
   [& args]
-  (println "Hello, World!"))
+  (pprint (parse-opts args cli-options)))

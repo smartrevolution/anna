@@ -17,7 +17,7 @@
   (testing "Single-step of one iteration")
   (let [input (matrix [[1] [1]])
         output (matrix [[1]])
-        nn0 (make-neuralnetwork [2 3 1])
+        nn0 (make-neuralnet [2 3 1])
         nn1 (forwardpropagation nn0 input)
         nn2 (backpropagation nn1 output)
         nn3 (update-gradients nn2 input)
@@ -28,7 +28,7 @@
 
 (deftest precalculated-XOR
   (testing "Precalculated XOR"
-    (let [nn (make-neuralnetwork [2 2 1])
+    (let [nn (make-neuralnet [2 2 1])
           input (matrix [[1.0]
                          [0.0]])
           output (matrix [[1.0]])
@@ -63,7 +63,7 @@
 
 (deftest random-xor
   (testing "Randomized XOR"
-    (let [nn0 (make-neuralnetwork [2 3 1])
+    (let [nn0 (make-neuralnet [2 3 1])
           nn1 (train nn0 training-data)
           round (fn [n] (Math/round n))]
       (testing "0 xor 0 = 0"
