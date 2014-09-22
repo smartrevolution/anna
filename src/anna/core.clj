@@ -18,6 +18,7 @@
 (def ^:dynamic *osname* (System/getProperty "os.name"))
 
 (defn- say
+  "Text-to-Speech output if you run this on Mac OS X"
   ([msg]
      (say msg true))
   ([msg non-blocking]
@@ -28,12 +29,16 @@
             (say-it msg))))))
 
 (defn- mapval
+  "Map input interval to output interval"
   [in-min in-max out-min out-max x]
   (+ (/ (* (- x in-min) (- out-max out-min))
         (- in-max in-min))
      out-min))
 
 (defn- num-to-vector
+  "Creates a vector of size, sets all elements to 0.0, 
+except the xth element, which is set to 1.0
+Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
   [size x]
   (assoc (into [] (map #(vector %)
                        (repeat size 0.0)))
@@ -41,6 +46,7 @@
     [1.0]))
 
 (defn- load-xor-data
+"Test data for XOR network"
   []
   [{:input [[0] [0]] :output [[0]]}
    {:input [[1] [0]] :output [[1]]}
@@ -62,12 +68,14 @@ and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
        {:input input-vector :output output-vector}))))
 
 (defn save-neuralnet
+  "Serialize neural network to file"
   [filename form]
   (let [file (file filename)]
     (with-open [w (java.io.FileWriter. file)]
       (print-dup form w))))
 
 (defn load-neuralnet
+  "Load neural network from file"
   [filename]
   (let [file (file filename)]
     (with-open [r (java.io.PushbackReader. (java.io.FileReader. file))]
@@ -75,22 +83,25 @@ and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
 
 
 (defn- g
+  "Sigmoid function"
   [z]
   (emap #(/ 1 (+ 1 (Math/exp (- %)))) z)) ;TODO: Vectorized version
 
 (defn- g'
+  "Sigmoid derivative function"
   [z]
   (Mtrx/* (g z) (Mtrx/- 1 (g z))))
 
 (defn- zeros
+  "Create a matrix with dimension n x m and fill with 0.0"
   [n m]
   (compute-matrix [n m]
-                  (fn [_ _] 0)))
+                  (fn [_ _] 0.0)))
 
 (defn- ones
   [n m]
   (compute-matrix [n m]
-                  (fn [_ _] 1)))
+                  (fn [_ _] 1.0)))
 
 (defn- rand-epsilon
   [epsilon]
