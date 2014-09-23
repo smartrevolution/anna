@@ -257,41 +257,48 @@ and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
     (let [opt (:options this)
           mini-batch-size (:mini-batch-size opt)
           max-iterations (:max-iterations opt)
-          error-threshold (:error-threshold opt)
-          select-mini-batch (fn [] (repeatedly mini-batch-size
-                                               #(rand-nth training-data)))]
+          error-threshold (:error-threshold opt)]
       (say (str "Max iterations are " max-iterations ".") false)
       (say (str "Mini batch size is " mini-batch-size ".") false)
       (say (str "Error threshold is " error-threshold ".") false)
-      (loop [iter 0
-             mini-batch (select-mini-batch)
+      (loop [epoche 0
              outer-nn this]
+        (println "Epoche:" epoche "Error:" (:error outer-nn))
         (if (or (< (:error outer-nn) error-threshold)
-                (> iter max-iterations))
+                (> epoche max-iterations))
           outer-nn
-          (recur (inc iter)
-                 (select-mini-batch)
-                 (loop [sample (first mini-batch)
-                        remaining-samples (rest mini-batch)
-                        total-error 0
-                        inner-nn outer-nn]
-                   (if (empty? remaining-samples)
-                     inner-nn
-                     (let [nn1 (forwardpropagation inner-nn (:input sample))
-                           nn2 (backpropagation nn1 (:output sample))
-                           nn3 (update-gradients nn2 (:input sample))
-                           avg-error (/ (/ (calc-error nn3 (:output sample))
-                                           mini-batch-size) 2)
-                           summed-avg-error (+ total-error avg-error)
-                           nn4 (assoc nn3 :error summed-avg-error :iterations iter)]
-                       ;(when (= 0 (mod iter 10)))
-                       (println iter "-" sample "=" (output nn4)
-                                "Error" (errorr nn4 (:output sample))
-                                "Error:" summed-avg-error)
-                       (recur (first remaining-samples)
-                              (rest remaining-samples)
-                              summed-avg-error
-                              (update-weights nn4))))))))))
+          (recur
+           (inc epoche)
+           (loop [mini-batches (partition mini-batch-size
+                                          (shuffle training-data))
+                  cur-mini-batch (first mini-batches)
+                  inner-nn outer-nn]
+             (if (empty? mini-batches)
+                 inner-nn
+                 (recur
+                  (rest mini-batches)
+                  (first (rest mini-batches))
+                  (loop [sample (first cur-mini-batch)
+                         remaining-samples (rest cur-mini-batch)
+                         total-error 0
+                         inner-nn' inner-nn]
+                    (if (empty? remaining-samples)
+                      inner-nn'
+                      (let [nn1 (forwardpropagation inner-nn' (:input sample))
+                            nn2 (backpropagation nn1 (:output sample))
+                            nn3 (update-gradients nn2 (:input sample))
+                            avg-error (/ (/ (calc-error nn3 (:output sample))
+                                            mini-batch-size) 2)
+                            summed-avg-error (+ total-error avg-error)
+                            nn4 (assoc nn3 :error summed-avg-error)]
+                                        ;(when (= 0 (mod iter 10)))
+                        #_(println sample "=" (output nn4)
+                                 "Error" (errorr nn4 (:output sample))
+                                 "Error:" summed-avg-error)
+                        (recur (first remaining-samples)
+                               (rest remaining-samples)
+                               summed-avg-error
+                               (update-weights nn4)))))))))))))
   (output
     [this]
     (-> this :layers last :activations))
