@@ -5,28 +5,38 @@
         [clojure.java.shell :only [sh]])
   (:require [clojure.core.matrix.operators :as Mtrx]
             [clojure.string :as str]
-            [clojure.tools.logging :as log]
+            [taoensso.timbre :as log]
             [clojure.tools.nrepl.server :only [start-server stop-server] :as nrepl]
             [lamina.core :as lamina]
             [aleph.http :as aleph]
-            [clojure.tools.cli :refer [parse-opts]])
+            [clojure.tools.cli :refer [parse-opts]]
+            [iota])
   (:gen-class))
 
 
 (def ^:dynamic *talk-to-me* true)
+(def ^:dynamic *log-progress* true)
 (def ^:dynamic *username* (System/getProperty "user.name"))
 (def ^:dynamic *osname* (System/getProperty "os.name"))
+(def ^:dynamic *log-output* (clojure.java.io/writer "/tmp/anna.log"))
+(comment (.close *log-output*))
 
 (defn- say
   "Text-to-Speech output if you run this on Mac OS X"
   ([msg]
-     (say msg true))
-  ([msg non-blocking]
+     (say msg false))
+  ([msg blocking]
       (when (and *talk-to-me* (= "Mac OS X" *osname*))
         (let [say-it (fn [s] (sh "say" "-v" "Samantha" s))]
-          (if (= true non-blocking)
+          (if (= true blocking)
             (future (say-it msg))
             (say-it msg))))))
+
+(defn- log-msg
+  [& msg]
+  (when (= true *log-progress*)
+    (binding [*out* *log-output*]
+      (log/info msg))))
 
 (defn- mapval
   "Map input interval to output interval"
@@ -53,39 +63,69 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
    {:input [[0] [1]] :output [[1]]}
    {:input [[1] [1]] :output [[0]]}])
 
-(defn- load-mnist-data
-  "Load csv files with mnist test data. Numbers are between 0..255 
-and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
+(defn- transform-mnist-data
+  [line]
+  (let [scale-0-to-1 (partial mapval 0 255 0.0 1.0)
+        [output & input] (str/split line #",")
+        input-vector (into [] (map #(vector (scale-0-to-1 (Integer/parseInt %)))
+                                       input))
+        output-vector (num-to-vector 10 (Integer/parseInt output))]
+    {:input input-vector :output output-vector}))
+
+(defn- load-data
   [filename]
-  (with-open [rdr (reader filename)]
-    (doall
-     (for [line (line-seq rdr)
-           :let [scale-0-to-1 (partial mapval 0 255 0.0 1.0)
-                 [output & input] (str/split line #",")
-                 input-vector (into [] (map #(vector (scale-0-to-1 (Integer/parseInt %)))
-                                            input))
-                 output-vector (num-to-vector 10 (Integer/parseInt output))]]
-       {:input input-vector :output output-vector}))))
+  (let [num-lines (atom 0)
+        dataset (atom [])]
+    (with-open [rdr (reader filename)]
+      (doseq [line (line-seq rdr)]
+        (swap! num-lines inc)
+        (swap! dataset conj line)
+        (when (= 0 (mod @num-lines 2500))
+          (log-msg @num-lines))))
+    @dataset))
+
+;; (defn- load-mnist-data
+;;   "Load csv files with mnist test data. Numbers are between 0..255 
+;; and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
+;;   [filename]
+;;   (let [scale-0-to-1 (partial mapval 0 255 0.0 1.0)
+;;         data (slurp filename)
+;;         lines (str/split-lines data)#_(line-seq rdr)]
+;;     #_(with-open [rdr (reader filename)])
+;;     (loop [line (first lines)
+;;            remaining-lines (rest lines)
+;;            accu (transient [])
+;;            i 0]
+;;       (if (empty? line)
+;;         (persistent! accu)
+;;         (let [[output & input] (str/split line #",")
+;;               #_input-vector #_(into [] (map #(vector (scale-0-to-1 (Integer/parseInt %)))
+;;                                          input))
+;;               #_output-vector #_(num-to-vector 10 (Integer/parseInt output))]
+;;           (when (= 0 (mod i 2500))
+;;             (log-msg i))
+;;           (recur (first remaining-lines)
+;;                  (rest  remaining-lines)
+;;                  (conj! accu [output input]) #_(conj! accu {:input input-vector :output output-vector})
+;;                  (inc i)))))))
 
 (defn save-neuralnet
   "Serialize neural network to file"
   [filename form]
-  (let [file (file filename)]
-    (with-open [w (java.io.FileWriter. file)]
-      (print-dup form w))))
+  (let [f (file filename)]
+    (spit f (pr-str form))))
 
 (defn load-neuralnet
   "Load neural network from file"
   [filename]
-  (let [file (file filename)]
-    (with-open [r (java.io.PushbackReader. (java.io.FileReader. file))]
-      (read r))))
+  (let [f (file filename)]
+    (read-string (slurp f))))
 
 
 (defn- g
   "Sigmoid function"
   [z]
-  (emap #(/ 1 (+ 1 (Math/exp (- %)))) z)) ;TODO: Vectorized version
+  (emap #(/ 1 (+ 1 (Math/exp (- %)))) z)) ;TODO: Better vectorized version
 
 (defn- g'
   "Sigmoid derivative function"
@@ -114,8 +154,8 @@ and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
 
 (defn- matrix-mult
   [a b]
-  ;(println "a" (shape a) (matrix? a)) (pm a)
-  ;(println "b" (shape b) (matrix? b)) (pm b)
+  ;(log-msg "a" (shape a) (matrix? a)) (pm a)
+  ;(log-msg "b" (shape b) (matrix? b)) (pm b)
   (let [result (mmul a b)]
     (if (matrix? result)
       result
@@ -129,6 +169,35 @@ and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
 (defn- mse
   [errors]
   (/ (reduce + 0 (flatten (pow errors 2))) (count errors)))
+
+(defrecord Options [learning-rate
+                    max-iterations
+                    error-threshold
+                    momentum
+                    mini-batch-size
+                    transformer-fn
+                    num-validation-records])
+
+(defn make-options
+  ([]
+     (make-options {}))
+  ([{:keys [learning-rate
+            max-iterations
+            error-threshold
+            momentum
+            mini-batch-size
+            transformer-fn
+            num-validation-records]
+     :or {learning-rate 0.7
+          max-iterations 2000
+          error-threshold 0.001
+          momentum 0.3
+          mini-batch-size 4
+          transformer-fn nil
+          num-validation-records 0}
+     :as params}] 
+     (Options. learning-rate max-iterations error-threshold
+               momentum mini-batch-size transformer-fn num-validation-records)))
 
 (defprotocol Forwardpropagation
   (calc-activations [this input]))
@@ -145,16 +214,11 @@ and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
   (calc-error [this ideal-output])
   (update-gradients [this input])
   (update-weights [this])
+  (validate [this validation-data])
   (train [this training-data])
   (output [this])
-  (errorr [this ideal-output])
+  (global-error [this ideal-output])
   (exec [this input]))
-
-(defrecord Options [learning-rate
-                    max-iterations
-                    error-threshold
-                    momentum
-                    mini-batch-size])
 
 (defrecord Layer [weights weighted-sum activations delta gradients]
   Forwardpropagation
@@ -178,16 +242,20 @@ and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
       (assoc this :delta (rest hidden-delta))))
   (calc-gradients
     [this activations]
-    (let [gradients (matrix-mult (:delta this)
-                                 (transpose
-                                  (bind-bias activations)))]
+    (let [gradients (matrix (matrix-mult (:delta this)
+                                         (transpose
+                                          (bind-bias activations))))]
       (assoc this :gradients gradients)))
   (calc-new-weights
     [this learning-rate momentum]
     (let [new-weights (Mtrx/+ (:weights this)
                               (Mtrx/* learning-rate
                                       (:gradients this)))]
-      (assoc this :weights new-weights))))
+      (assoc this :weights new-weights)))) 
+
+(defn- rounded-results
+  [output]
+  (map #(Math/round %) (map first output)))
 
 (defrecord NeuralNetwork [layers iterations error options]
   ANN
@@ -225,8 +293,7 @@ and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
                    updated-layer))))))
   (calc-error
     [this ideal-output]
-    #_(mse (-> this :layers last :delta))
-    (mse (errorr this ideal-output)))
+    (mse (global-error this ideal-output)))
   (update-gradients
     [this input]
     (loop [layers (:layers this)
@@ -252,36 +319,51 @@ and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
                                               (:momentum (:options this)))]
           (recur (rest layers)
                  (conj accu updated-layer))))))
+  (validate
+    [this validation-data]
+    (doseq [record validation-data]
+      (forwardpropagation this record)))
   (train
     [this training-data]
     (let [opt (:options this)
           mini-batch-size (:mini-batch-size opt)
           max-iterations (:max-iterations opt)
-          error-threshold (:error-threshold opt)]
-      (say (str "Max iterations are " max-iterations ".") false)
-      (say (str "Mini batch size is " mini-batch-size ".") false)
-      (say (str "Error threshold is " error-threshold ".") false)
-      (loop [epoche 0
+          error-threshold (:error-threshold opt)
+          transformer-fn (if-let [f (:transformer-fn opt)] 
+                           (fn [x] (f x))
+                           (fn [x] x))
+          num-validation-records (:num-validation-records opt)
+          [validation-dataset & training-dataset] (split-at num-validation-records
+                                                            training-data)]
+      (say (str "Training with " (count training-dataset) " records."))
+      (say (str "Validating with " (count validation-dataset) " records."))
+      (loop [epoch 0
              outer-nn this]
-        (println "Epoche:" epoche "Error:" (:error outer-nn))
+        (log-msg "Epoch:" epoch "Error:" (:error outer-nn))
         (if (or (< (:error outer-nn) error-threshold)
-                (> epoche max-iterations))
+                (> epoch max-iterations))
           outer-nn
           (recur
-           (inc epoche)
+           (inc epoch)
            (loop [mini-batches (partition mini-batch-size
-                                          (shuffle training-data))
+                                          (shuffle training-dataset))
                   cur-mini-batch (first mini-batches)
+                  num-batch 0
                   inner-nn outer-nn]
+             (log-msg (str "Epoch: " epoch ", Mini-Batch: " num-batch ", Error: " (:error inner-nn)))
+;             (say (str "Mini batch number " num-batch " started."))
              (if (empty? mini-batches)
-                 inner-nn
-                 (recur
-                  (rest mini-batches)
-                  (first (rest mini-batches))
-                  (loop [sample (first cur-mini-batch)
-                         remaining-samples (rest cur-mini-batch)
-                         total-error 0
-                         inner-nn' inner-nn]
+               (do
+                 (validate inner-nn validation-dataset)
+                 inner-nn)
+               (recur
+                (rest mini-batches)
+                (first (rest mini-batches))
+                (inc num-batch)
+                (loop [sample (transformer-fn (first cur-mini-batch))
+                       remaining-samples (rest cur-mini-batch)
+                       total-error 0
+                       inner-nn' inner-nn]
                     (if (empty? remaining-samples)
                       inner-nn'
                       (let [nn1 (forwardpropagation inner-nn' (:input sample))
@@ -291,18 +373,17 @@ and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
                                             mini-batch-size) 2)
                             summed-avg-error (+ total-error avg-error)
                             nn4 (assoc nn3 :error summed-avg-error)]
-                                        ;(when (= 0 (mod iter 10)))
-                        #_(println sample "=" (output nn4)
-                                 "Error" (errorr nn4 (:output sample))
-                                 "Error:" summed-avg-error)
-                        (recur (first remaining-samples)
+                        ;; (log-msg sample "=" (output nn4)
+                        ;;          "Error" (global-error nn4 (:output sample))
+                        ;;          "Error:" summed-avg-error)
+                        (recur (transformer-fn (first remaining-samples))
                                (rest remaining-samples)
                                summed-avg-error
                                (update-weights nn4)))))))))))))
   (output
     [this]
     (-> this :layers last :activations))
-  (errorr
+  (global-error
     [this ideal-output]
     (Mtrx/- ideal-output (output this)))
   (exec
@@ -316,7 +397,7 @@ and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
 
 (defn make-neuralnet
   ([nodes-in-layer]
-     (make-neuralnet nodes-in-layer (Options. 0.7 2000 0.001 0.3 4)))
+     (make-neuralnet nodes-in-layer (make-options)))
   ([nodes-in-layer options]
       {:pre [(and
               (vector? nodes-in-layer)
@@ -336,6 +417,42 @@ and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
           (say "Neural Network created.")
           (NeuralNetwork. layers 0 1.0 options)))))
 
+(defmacro defneuralnet
+  [name layers & options]
+  (let [opts (first options)]
+    (if (nil? opts)
+      `(def ~name (make-neuralnet ~layers))
+      `(def ~name (make-neuralnet ~layers ~opts)))))
+
+(defn- xor-test
+  []
+  (binding [*talk-to-me* false]
+    (let [nn0 (make-neuralnet [2 3 1])
+          nn1 (train nn0 (load-xor-data))
+          check (fn [result expected] (= expected
+                                         (Math/round (first (first result)))))]
+      (binding [*talk-to-me* true]
+        (let [result (list (check (exec nn1 [[0] [0]]) 0)
+                           (check (exec nn1 [[1] [0]]) 1)
+                           (check (exec nn1 [[0] [1]]) 1)
+                           (check (exec nn1 [[1] [1]]) 0))]
+          (if (every? true? result)
+            (say "Ex OR test successful")
+            (say "Ex OR was not test successful")))))))
+
+(defn- mnist-test
+  []
+  (binding [*talk-to-me* true]
+    (let [test-data (load-data "/Users/stefan/proj/anna/mnist_train.csv")
+          nn0 (make-neuralnet [784 15 10] (make-options {:mini-batch-size 10
+                                                         :learning-rate 3.0
+                                                         :max-iterations 30
+                                                         :transformer-fn transform-mnist-data
+                                                         :num-validation-records 1000}))
+          nn1 (train nn0 test-data)
+          check (fn [result expected] (= expected
+                                         (Math/round (first (first result)))))]
+      nn1)))
 
 (defn hello-world [channel request]
   (lamina/enqueue channel

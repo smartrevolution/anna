@@ -8,76 +8,76 @@
   (:require [clojure.core.matrix.operators :as Mtrx]))
 
 
-(def training-data [{:input [[0] [0]] :output [[0]]}
-                    {:input [[1] [0]] :output [[1]]}
-                    {:input [[0] [1]] :output [[1]]}
-                    {:input [[1] [1]] :output [[0]]}])
-
-(deftest single-step
-  (testing "Single-step of one iteration")
-  (let [input (matrix [[1] [1]])
-        output (matrix [[1]])
-        nn0 (make-neuralnet [2 3 1])
-        nn1 (forwardpropagation nn0 input)
-        nn2 (backpropagation nn1 output)
-        nn3 (update-gradients nn2 input)
-        nn4 (update-weights nn3)
-        first-weights (fn [nn] (-> nn :layers first :weights))
-        first-column (fn [nn] (get-column (-> nn :layers first :weights) 0))]
-    (is (= 0 (compare (first-column nn2) (first-column nn3))))))
-
-(deftest precalculated-XOR
-  (testing "Precalculated XOR"
-    (let [nn (make-neuralnet [2 2 1])
-          input (matrix [[1.0]
-                         [0.0]])
-          output (matrix [[1.0]])
-          w1 (matrix [[-0.46 -0.07 0.22]
-                      [0.10 0.94 0.46]])
-          z1 (matrix [[-0.53]
-                      [1.05]])
-          a1 (matrix [[0.37]
-                      [0.74]])
-          d1 (matrix [[0.0]
-                      [0.0]])
-          g1 (matrix [[0.0 0.0 0.0]
-                      [0.0 0.0 0.0]])
-          w2 (matrix [[0.78 -0.22 0.58]])
-          z2 (matrix [[1.1254]])
-          a2 (matrix [[0.75]])
-          d2 (matrix [[0.0]])
-          g2 (matrix [[0.0 0.0 0.0]])
-          layer1 (anna.core.Layer. w1 z1 a1 d1 g1)
-          layer2 (anna.core.Layer. w2 z2 a2 d2 g2)
-          nn0 (assoc nn :layers [layer1 layer2])
-          nn1 (backpropagation nn0 output)
-          nn2 (update-gradients nn1 input)
-          nn3 (update-weights nn2)]
-      ;;(println "**************************")
-      ;;(pprint nn0)
-      ;; (pprint nn1)
-      ;; (pprint nn2)
-      ;;(pprint nn3)
-      #_(println "**************************"))))
-
-
-(deftest random-xor
+(deftest xor
   (testing "Randomized XOR"
-    (let [nn0 (make-neuralnet [2 3 1])
-          nn1 (train nn0 training-data)
-          round (fn [n] (Math/round n))]
-      (testing "0 xor 0 = 0"
-        (let [result (exec nn1 [[0] [0]])]
-          (is (= result 0))))
-      (testing "1 xor 0 = 1"
-        (is (= (exec nn1 [[1] [0]]) 1)))
-      (testing "0 xor 1 = 1"
-        (is (= (exec nn1 [[0] [1]]) 1)))
-      (testing "1 xor 1 = 0"
-        (let [result (exec nn1 [[1] [1]])]
-          (is (= result 0))))
-      #_(pprint nn0)
-      #_(pprint nn1))))
+    (binding [*talk-to-me* false]
+      (let [nn0 (make-neuralnet [2 3 1])
+            nn1 (train nn0 training-data)
+            round (fn [n] (Math/round n))]
+        (testing "0 xor 0 = 0"
+          (let [result (exec nn1 [[0] [0]])]
+            (is (= (Math/round result) 0))))
+        (testing "1 xor 0 = 1"
+          (is (= (round (exec nn1 [[1] [0]])) 1)))
+        (testing "0 xor 1 = 1"
+          (is (= (round (exec nn1 [[0] [1]])) 1)))
+        (testing "1 xor 1 = 0"
+          (let [result (exec nn1 [[1] [1]])]
+            (is (= (round result) 0))))
+        #_(pprint nn0)
+        #_(pprint nn1)))))
+
+;; (def training-data [{:input [[0] [0]] :output [[0]]}
+;;                     {:input [[1] [0]] :output [[1]]}
+;;                     {:input [[0] [1]] :output [[1]]}
+;;                     {:input [[1] [1]] :output [[0]]}])
+
+;; (deftest single-step
+;;   (testing "Single-step of one iteration")
+;;   (let [input (matrix [[1] [1]])
+;;         output (matrix [[1]])
+;;         nn0 (make-neuralnet [2 3 1])
+;;         nn1 (forwardpropagation nn0 input)
+;;         nn2 (backpropagation nn1 output)
+;;         nn3 (update-gradients nn2 input)
+;;         nn4 (update-weights nn3)
+;;         first-weights (fn [nn] (-> nn :layers first :weights))
+;;         first-column (fn [nn] (get-column (-> nn :layers first :weights) 0))]
+;;     (is (= 0 (compare (first-column nn2) (first-column nn3))))))
+
+;; (deftest precalculated-XOR
+;;   (testing "Precalculated XOR"
+;;     (let [nn (make-neuralnet [2 2 1])
+;;           input (matrix [[1.0]
+;;                          [0.0]])
+;;           output (matrix [[1.0]])
+;;           w1 (matrix [[-0.46 -0.07 0.22]
+;;                       [0.10 0.94 0.46]])
+;;           z1 (matrix [[-0.53]
+;;                       [1.05]])
+;;           a1 (matrix [[0.37]
+;;                       [0.74]])
+;;           d1 (matrix [[0.0]
+;;                       [0.0]])
+;;           g1 (matrix [[0.0 0.0 0.0]
+;;                       [0.0 0.0 0.0]])
+;;           w2 (matrix [[0.78 -0.22 0.58]])
+;;           z2 (matrix [[1.1254]])
+;;           a2 (matrix [[0.75]])
+;;           d2 (matrix [[0.0]])
+;;           g2 (matrix [[0.0 0.0 0.0]])
+;;           layer1 (anna.core.Layer. w1 z1 a1 d1 g1)
+;;           layer2 (anna.core.Layer. w2 z2 a2 d2 g2)
+;;           nn0 (assoc nn :layers [layer1 layer2])
+;;           nn1 (backpropagation nn0 output)
+;;           nn2 (update-gradients nn1 input)
+;;           nn3 (update-weights nn2)]
+;;       ;;(println "**************************")
+;;       ;;(pprint nn0)
+;;       ;; (pprint nn1)
+;;       ;; (pprint nn2)
+;;       ;;(pprint nn3)
+;;       #_(println "**************************"))))
 
 ;; (deftest vectormath
 ;;   (testing "vector math works"
