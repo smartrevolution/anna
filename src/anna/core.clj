@@ -9,8 +9,7 @@
             [clojure.tools.nrepl.server :only [start-server stop-server] :as nrepl]
             [lamina.core :as lamina]
             [aleph.http :as aleph]
-            [clojure.tools.cli :refer [parse-opts]]
-            [iota])
+            [clojure.tools.cli :refer [parse-opts]])
   (:gen-class))
 
 
@@ -84,36 +83,13 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
           (log-msg @num-lines))))
     @dataset))
 
-;; (defn- load-mnist-data
-;;   "Load csv files with mnist test data. Numbers are between 0..255 
-;; and will be scaled between 0.0..1.0. Output will be converted to 10-dim vector."
-;;   [filename]
-;;   (let [scale-0-to-1 (partial mapval 0 255 0.0 1.0)
-;;         data (slurp filename)
-;;         lines (str/split-lines data)#_(line-seq rdr)]
-;;     #_(with-open [rdr (reader filename)])
-;;     (loop [line (first lines)
-;;            remaining-lines (rest lines)
-;;            accu (transient [])
-;;            i 0]
-;;       (if (empty? line)
-;;         (persistent! accu)
-;;         (let [[output & input] (str/split line #",")
-;;               #_input-vector #_(into [] (map #(vector (scale-0-to-1 (Integer/parseInt %)))
-;;                                          input))
-;;               #_output-vector #_(num-to-vector 10 (Integer/parseInt output))]
-;;           (when (= 0 (mod i 2500))
-;;             (log-msg i))
-;;           (recur (first remaining-lines)
-;;                  (rest  remaining-lines)
-;;                  (conj! accu [output input]) #_(conj! accu {:input input-vector :output output-vector})
-;;                  (inc i)))))))
-
 (defn save-neuralnet
   "Serialize neural network to file"
   [filename form]
   (let [f (file filename)]
-    (spit f (pr-str form))))
+    (spit f (pr-str (update-in form
+                               [:options :transformer-fn]
+                               (constantly nil))))))
 
 (defn load-neuralnet
   "Load neural network from file"
@@ -216,7 +192,7 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
   (update-weights [this])
   (validate [this validation-data])
   (train [this training-data])
-  (output [this])
+  (output-layer [this])
   (global-error [this ideal-output])
   (exec [this input]))
 
@@ -333,8 +309,10 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
                            (fn [x] (f x))
                            (fn [x] x))
           num-validation-records (:num-validation-records opt)
-          [validation-dataset & training-dataset] (split-at num-validation-records
-                                                            training-data)]
+          datasets (split-at num-validation-records
+                             training-data)
+          validation-dataset (first datasets)
+          training-dataset (second datasets)]
       (say (str "Training with " (count training-dataset) " records."))
       (say (str "Validating with " (count validation-dataset) " records."))
       (loop [epoch 0
@@ -380,20 +358,17 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
                                (rest remaining-samples)
                                summed-avg-error
                                (update-weights nn4)))))))))))))
-  (output
+  (output-layer
     [this]
     (-> this :layers last :activations))
   (global-error
     [this ideal-output]
-    (Mtrx/- ideal-output (output this)))
+    (Mtrx/- ideal-output (output-layer this)))
   (exec
     [this input]
     (let [result (-> (forwardpropagation this input)
-                     output)
-          flattened-result (flatten result)]
-      (if (= 1 flattened-result)
-        flattened-result ;ann with binary output
-        result)))); ann with multiple outputs
+                     output-layer)]
+      (map #(Math/round %) (map first result)))))
 
 (defn make-neuralnet
   ([nodes-in-layer]
@@ -424,6 +399,24 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
       `(def ~name (make-neuralnet ~layers))
       `(def ~name (make-neuralnet ~layers ~opts)))))
 
+;; (defn- perceptron-test
+;;   []
+;;   (let [training [{:bias 1 :input [1 1] :output 1}
+;;                   {:bias 1 :input [0 0] :output 0}
+;;                   {:bias 1 :input [1 0] :output 0}
+;;                   {:bias 1 :input [0 1] :output 0}]
+;;         learning-rate 0.3
+;;         acivate (fn [n] (if (<= n 0)
+;;                           0
+;;                           1))
+;;         weights [0.23456 0.78901 0.56789]
+;;         feed-forward (fn [input]
+;;                        (reduce + (map (fn [i w] (* i w))
+;;                                       input weights)))
+;;         train (fn []
+;;                 (map #(feed-forward (:input %))
+;;                      training-data))]))
+
 (defn- xor-test
   []
   (binding [*talk-to-me* false]
@@ -448,7 +441,7 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
                                                          :learning-rate 3.0
                                                          :max-iterations 30
                                                          :transformer-fn transform-mnist-data
-                                                         :num-validation-records 1000}))
+                                                         #_:num-validation-records #_1000}))
           nn1 (train nn0 test-data)
           check (fn [result expected] (= expected
                                          (Math/round (first (first result)))))]

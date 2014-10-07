@@ -9,7 +9,6 @@
                  [org.clojure/tools.logging "0.3.0"]
                  [org.clojure/tools.nrepl "0.2.5"]
                  [aleph "0.3.3"]
-                 [iota "1.1.2"]
                  [org.clojure/tools.cli "0.3.1"]
                  [com.taoensso/timbre "3.3.1"]
                  #_[net.mikera/vectorz-clj "0.26.0"]
