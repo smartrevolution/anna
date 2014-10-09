@@ -11,6 +11,8 @@
                  [aleph "0.3.3"]
                  [org.clojure/tools.cli "0.3.1"]
                  [com.taoensso/timbre "3.3.1"]
+                 [ring "1.3.1"]
+                 [ring/ring-json "0.3.1"]
                  #_[net.mikera/vectorz-clj "0.26.0"]
                  #_[clatrix "0.4.0"]]
   :main ^:skip-aot anna.core

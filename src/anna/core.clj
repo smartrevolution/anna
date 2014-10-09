@@ -9,6 +9,9 @@
             [clojure.tools.nrepl.server :only [start-server stop-server] :as nrepl]
             [lamina.core :as lamina]
             [aleph.http :as aleph]
+            [ring.middleware.json :as json]
+            [ring.middleware.params :as ring]
+            [ring.middleware.keyword-params :as keywords]
             [clojure.tools.cli :refer [parse-opts]])
   (:gen-class))
 
@@ -213,8 +216,8 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
     [this weights delta]
     (let [hidden-delta (Mtrx/* (matrix-mult (transpose weights)
                                             delta)
-                               (g' (bind-bias (:weighted-sum this))))] ;TODO: Bias?
-      ;call (rest hidden-delta) to remove the bias from the result
+                               (g' (bind-bias (:weighted-sum this))))]
+      ;calling (rest hidden-delta) to remove the bias from the result
       (assoc this :delta (rest hidden-delta))))
   (calc-gradients
     [this activations]
@@ -318,6 +321,8 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
       (loop [epoch 0
              outer-nn this]
         (log-msg "Epoch:" epoch "Error:" (:error outer-nn))
+        (when (= (mod epoch 1000) 0)
+          (say (str "Starting epoch " epoch)))
         (if (or (< (:error outer-nn) error-threshold)
                 (> epoch max-iterations))
           outer-nn
@@ -419,19 +424,21 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
 
 (defn- xor-test
   []
-  (binding [*talk-to-me* false]
+  (binding [*talk-to-me* true]
     (let [nn0 (make-neuralnet [2 3 1])
           nn1 (train nn0 (load-xor-data))
           check (fn [result expected] (= expected
-                                         (Math/round (first (first result)))))]
+                                         (first result)))]
       (binding [*talk-to-me* true]
         (let [result (list (check (exec nn1 [[0] [0]]) 0)
                            (check (exec nn1 [[1] [0]]) 1)
                            (check (exec nn1 [[0] [1]]) 1)
                            (check (exec nn1 [[1] [1]]) 0))]
+          (println result)
           (if (every? true? result)
             (say "Ex OR test successful")
-            (say "Ex OR was not test successful")))))))
+            (say "Ex OR was not test successful"))))
+      nn1)))
 
 (defn- mnist-test
   []
@@ -448,12 +455,24 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
       nn1)))
 
 (defn hello-world [channel request]
-  (lamina/enqueue channel
+  (let [body (:body request)]
+    (lamina/enqueue channel
+                    {:status 200
+                     :headers {"content-type" "text/html"}
+                     :body (str "Hello World! " body)})))
+
+(defn- run-anna
+  [input]
+  (let [nn (load-neuralnet "/Users/stefan/proj/anna/mnistx")]
+    (println input)
+    (println (exec nn (map vector (read-string (str "[" input "]")))))))
+
+(defn anna [request]
+  (let [body (:body request)]
     {:status 200
      :headers {"content-type" "text/html"}
-     :body "Hello World!"}))
+     :body (str "Hello World! " (run-anna (:input (:params request))))}))
 
-;(start-http-server hello-world {:port 8008})
 
 ;(defonce nrepl-server (start-server :port 7888))
 
@@ -473,5 +492,10 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
 
 (defn -main
   [& args]
-  (pprint (parse-opts args cli-options))
-  (nrepl/start-server :port 7888))
+  ;(pprint (parse-opts args cli-options))
+  (nrepl/start-server :port 7888)
+  (aleph/start-http-server (aleph/wrap-ring-handler
+                            (-> anna
+                                json/wrap-json-params
+                                keywords/wrap-keyword-params
+                                ring/wrap-params)) {:port 8008}))
