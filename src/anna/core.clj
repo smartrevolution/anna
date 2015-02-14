@@ -12,16 +12,21 @@
             [ring.middleware.json :as json]
             [ring.middleware.params :as ring]
             [ring.middleware.keyword-params :as keywords]
-            [clojure.tools.cli :refer [parse-opts]])
+            [clojure.tools.cli :refer [parse-opts]]
+            [clj-progress.core :as progressbar]
+            [opencsv-clj.core :as csv]
+            [iota :as iota])
   (:gen-class))
 
+(set! *warn-on-reflection* true)
 
+(def ^:dynamic *training-data* nil)
 (def ^:dynamic *talk-to-me* true)
 (def ^:dynamic *log-progress* true)
 (def ^:dynamic *username* (System/getProperty "user.name"))
 (def ^:dynamic *osname* (System/getProperty "os.name"))
 (def ^:dynamic *log-output* (clojure.java.io/writer "/tmp/anna.log"))
-(comment (.close *log-output*))
+(comment (.close *log-output*)) 
 
 (defn- say
   "Text-to-Speech output if you run this on Mac OS X"
@@ -74,6 +79,120 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
         output-vector (num-to-vector 10 (Integer/parseInt output))]
     {:input input-vector :output output-vector}))
 
+
+#_(let [name "foo"]
+  (progressbar/init "foo" 100)
+  (dotimes [i 100]
+    (progressbar/tick)
+    (Thread/sleep 50))
+  (progressbar/done))
+
+(defn- read-records
+  [filename]
+  (let [to-int (fn [coll]
+                 (map #(Integer/parseInt %)
+                      coll))]
+    (with-open [r (reader filename)]
+      (loop [records (csv/read-csv r) accu (transient [])]
+        (let [cur (to-int (first records))]
+          (if (empty? cur)
+            (persistent! accu)
+            (recur (rest records) (conj! accu cur))))))))
+
+
+(defn- record-iterator
+  "Returns a function to iterate over the records of the given file in random order"
+  [filename]
+  (let [fh (iota/vec filename);file-handle
+        records-consumed (atom 0);num records already consumed: WE KEEP STATE!!!
+        ;count num records in file: emit 1 for each record and reduce the list of ones with +
+        num-records (clojure.core.reducers/fold + (clojure.core.reducers/map
+                                                   (fn [x] 1)
+                                                   fh))
+        random-index (vec (shuffle (range num-records)));0..num-records ints randomized
+        iter-fn (fn [n]
+                  (let [n' (min (- num-records @records-consumed n) n)]
+                    (if (> n' 0) ; still records available?
+                      (let [next-records (repeatedly n'
+                                                     #(nth fh (random-index @records-consumed)))]
+                        (swap! records-consumed #(+ % n')) ;add n' to records-consumed
+                        {:mini-batch next-records
+                         :records-consumed @records-consumed
+                         :records-remaining (- num-records @records-consumed)
+                         :num-records num-records})
+                      nil)))] 
+    {:num-records num-records
+     :record-iterator iter-fn}))
+
+
+(defprotocol DataAccess
+  (next-mini-batch [this]))
+
+(defprotocol DataTransformation
+  (line->vector [this line]))
+
+(defprotocol DataConversion
+  (str->num [this coll]))
+
+(defprotocol DataScaling
+  (num->scaled [this coll]))
+
+(defprotocol InputOutputSelection
+  (in-out [this coll]))
+
+(defrecord Dataset [filename mini-batch-size training-data]
+  DataAccess
+  (next-mini-batch [this]
+    (let [mini-batch-size (:mini-batch-size this)
+          record-iterator (get-in this [:training-data :record-iterator])
+          mini-batch (:mini-batch (record-iterator mini-batch-size))
+          mini-batch-vec (into [] (map #(->> %
+                                             (line->vector this)
+                                             (str->num this)
+                                             (num->scaled this)
+                                             (into []))
+                                       mini-batch))]
+      mini-batch-vec))
+  DataTransformation
+  (line->vector [this line]
+    (str/split line #","))
+  DataConversion
+  (str->num [this coll]
+    (map #(Integer/parseInt %) coll))
+  DataScaling
+  (num->scaled [this coll]
+    (let [{:keys [in-min in-max out-min out-max]} (:training-data this)
+          scale-num (partial mapval in-min in-max out-min out-max)]
+      (map #(scale-num %) coll))))
+
+(defn make-dataset
+  ([filename]
+     (make-dataset filename 10))
+  ([filename mini-batch-size]
+     (make-dataset filename mini-batch-size 0.0 1.0))
+  ([filename mini-batch-size out-min out-max]
+     (make-dataset filename
+                   mini-batch-size
+                   out-min
+                   out-max
+                   0
+                   255))
+  ([filename mini-batch-size out-min out-max in-min in-max]
+     (let [training-data (record-iterator filename)]
+       (Dataset. filename
+                 mini-batch-size
+                 (assoc training-data
+                   :out-min out-min
+                   :out-max out-max
+                   :in-min in-min
+                   :in-max in-max)))))
+
+(defn make-mnist-train-dataset
+  [mini-batch-size]
+  (let [filename (.getFile (io/resource "mnist_train.csv"))]
+    (make-dataset filename mini-batch-size)))
+
+
 (defn- load-data
   [filename]
   (let [num-lines (atom 0)
@@ -118,6 +237,7 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
                   (fn [_ _] 0.0)))
 
 (defn- ones
+  "Create a matrix with dimension n x m and fill with 1.0"
   [n m]
   (compute-matrix [n m]
                   (fn [_ _] 1.0)))
@@ -471,7 +591,7 @@ Example: size=3 x=2 returns [[0.0] [0.0] [1.0]]."
   (let [body (:body request)]
     {:status 200
      :headers {"content-type" "text/html"}
-     :body (str "Hello World! " (run-anna (:input (:params request))))}))
+     :body (str (run-anna (:input (:params request))))}))
 
 
 ;(defonce nrepl-server (start-server :port 7888))

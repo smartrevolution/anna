@@ -5,32 +5,46 @@
   ;(:use midje.sweet)
   (:use [clojure.core.matrix]
         [clojure.pprint])
-  (:require [clojure.core.matrix.operators :as Mtrx]))
+  (:require [clojure.core.matrix.operators :as Mtrx]
+            [clojure.java.io :as io]))
 
+
+(def training-data [{:input [[0] [0]] :output [[0]]}
+                    {:input [[1] [0]] :output [[1]]}
+                    {:input [[0] [1]] :output [[1]]}
+                    {:input [[1] [1]] :output [[0]]}])
 
 (deftest xor
   (testing "Randomized XOR"
     (binding [*talk-to-me* false]
       (let [nn0 (make-neuralnet [2 3 1])
-            nn1 (train nn0 training-data)
-            round (fn [n] (Math/round n))]
+            nn1 (train nn0 training-data)]
         (testing "0 xor 0 = 0"
-          (let [result (exec nn1 [[0] [0]])]
-            (is (= (Math/round result) 0))))
+          (let [result (first (exec nn1 [[0] [0]]))]
+            (is (= result 0))))
         (testing "1 xor 0 = 1"
-          (is (= (round (exec nn1 [[1] [0]])) 1)))
+          (let [result (first (exec nn1 [[1] [0]]))]
+            (is (= result 1))))
         (testing "0 xor 1 = 1"
-          (is (= (round (exec nn1 [[0] [1]])) 1)))
+          (let [result (first (exec nn1 [[0] [1]]))]
+            (is (= result 1))))
         (testing "1 xor 1 = 0"
-          (let [result (exec nn1 [[1] [1]])]
-            (is (= (round result) 0))))
+          (let [result (first (exec nn1 [[1] [1]]))]
+            (is (= result 0))))
         #_(pprint nn0)
         #_(pprint nn1)))))
 
-;; (def training-data [{:input [[0] [0]] :output [[0]]}
-;;                     {:input [[1] [0]] :output [[1]]}
-;;                     {:input [[0] [1]] :output [[1]]}
-;;                     {:input [[1] [1]] :output [[0]]}])
+(deftest dataset
+  (testing "Create dataset"
+    (let [mini-batch-size 3
+          ds (make-mnist-train-dataset mini-batch-size)
+          {:keys [mini-batch
+                  records-consumed
+                  records-remaining
+                  num-records]} (next-mini-batch ds)]
+      (is (= mini-batch-size (count mini-batch)))
+      (is (= mini-batch-size records-consumed))
+      (is (= mini-batch-size (- num-records (- num-records records-consumed)))))))
 
 ;; (deftest single-step
 ;;   (testing "Single-step of one iteration")
